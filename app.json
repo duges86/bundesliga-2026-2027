@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "bundesliga-2026-2027",
+    "slug": "bundesliga-2026-2027",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "bundesliga20262027",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+   "android": {
+  "package": "com.duges86.bundesliga20262027",
+  "icon": "./assets/images/icon.png",
+  "adaptiveIcon": {
+    "foregroundImage": "./assets/images/icon.png",
+    "backgroundColor": "#ffffff"
+  },
+  "edgeToEdgeEnabled": true,
+  "predictiveBackGestureEnabled": false
+},
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "362999ec-b3f3-4a63-ac05-cff579b6cb69"
+      }
+    }
+  }
+}
