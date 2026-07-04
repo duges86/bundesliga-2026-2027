@@ -552,18 +552,37 @@ const updatePassword = async () => {
     setMyTips(tipsObject);
   };
 
-  const loadAllTips = async () => {
+ const loadAllTips = async () => {
+  let allTipsData: any[] = [];
+  let from = 0;
+  const pageSize = 1000;
+
+  while (true) {
     const { data, error } = await supabase
       .from('predictions')
-      .select('*');
+      .select('*')
+      .range(from, from + pageSize - 1);
 
     if (error) {
       setMessage(error.message);
       return;
     }
 
-    setAllTips(data || []);
-  };
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    allTipsData = [...allTipsData, ...data];
+
+    if (data.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  setAllTips(allTipsData);
+};
   const loadProfiles = async () => {
   const { data, error } = await supabase
     .from('profiles')
@@ -2013,9 +2032,7 @@ dailyProgress,
           </Pressable>
         </View>
       )}
-// ČASŤ 12/12
-
-// ČASŤ 12/12
+{/* ČASŤ 12/12 */}
 
 {mainView === 'CHAMPION' && (
   <>
