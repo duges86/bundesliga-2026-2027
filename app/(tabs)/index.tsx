@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Linking,
+  Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,61 +12,105 @@ import {
   View
 } from 'react-native';
 
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 
 import { supabase } from '../../lib/supabase';
 
 const ADMIN_EMAIL = 'duges86@gmail.com';
-const CHAMPION_TEAMS = [
-  'Alžírsko',
-  'Argentína',
-  'Austrália',
-  'Belgicko',
-  'Bosna a Hercegovina',
-  'Brazília',
-  'Cabo Verde',
-  'Curaçao',
-  'Česko',
-  'Egypt',
-  'Ekvádor',
-  'Francúzsko',
-  'Ghana',
-  'Haiti',
-  'Holandsko',
-  'Chorvátsko',
-  'Irak',
-  'Irán',
-  'Japonsko',
-  'Jordánsko',
-  'Južná Afrika',
-  'Južná Kórea',
-  'Kanada',
-  'Kolumbia',
-  'Kongo DR',
-  'Maroko',
-  'Mexiko',
-  'Nemecko',
-  'Nový Zéland',
-  'Nórsko',
-  'Panama',
-  'Paraguaj',
-  'Pobrežie Slonoviny',
-  'Portugalsko',
-  'Rakúsko',
-  'Saudská Arábia',
-  'Senegal',
-  'Škótsko',
-  'Španielsko',
-  'Švajčiarsko',
-  'Švédsko',
-  'Tunisko',
-  'Turecko',
-  'Uruguaj',
-  'USA',
-  'Uzbekistan',
-  'Anglicko',
-  'Katar',
-];
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
+async function registerForPushNotifications(userId: string) {
+  if (!userId || Platform.OS === 'web') return;
+
+  try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Bundesliga upozornenia',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+
+    if (existingStatus !== 'granted') {
+      const permission = await Notifications.requestPermissionsAsync();
+      finalStatus = permission.status;
+    }
+
+    if (finalStatus !== 'granted') {
+      console.log('Používateľ nepovolil push notifikácie.');
+      return;
+    }
+
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.easConfig?.projectId;
+
+    if (!projectId) {
+      console.warn('EAS projectId nebolo nájdené.');
+      return;
+    }
+
+    const expoPushToken = (
+      await Notifications.getExpoPushTokenAsync({ projectId })
+    ).data;
+
+    const { error } = await supabase
+      .from('push_tokens')
+      .upsert(
+        {
+          user_id: userId,
+          expo_push_token: expoPushToken,
+          platform: Platform.OS,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,expo_push_token' }
+      );
+
+    if (error) {
+      console.warn('Push token sa nepodarilo uložiť:', error.message);
+    }
+  } catch (error) {
+    console.warn('Registrácia push notifikácií zlyhala:', error);
+  }
+}
+
+const TEAM_LOGOS: Record<string, any> = {
+  'FC Bayern München': require('../../assets/images/teams/Bayern Munich.png'),
+  'VfB Stuttgart': require('../../assets/images/teams/VfB Stuttgart.png'),
+  'Borussia Dortmund': require('../../assets/images/teams/Borussia Dortmund.png'),
+  'Hamburger SV': require('../../assets/images/teams/Hamburger SV.png'),
+  'RB Leipzig': require('../../assets/images/teams/RB Leipzig.png'),
+  'Borussia Mönchengladbach': require('../../assets/images/teams/Borussia Mönchengladbach.png'),
+  'Sport-Club Freiburg': require('../../assets/images/teams/SC Freiburg.png'),
+  'SC Freiburg': require('../../assets/images/teams/SC Freiburg.png'),
+  'SV Werder Bremen': require('../../assets/images/teams/SV Werder Bremen.png'),
+  'FC Augsburg': require('../../assets/images/teams/FC Augsburg.png'),
+  'FC Schalke 04': require('../../assets/images/teams/FC Schalke 04.png'),
+  '1. FSV Mainz 05': require('../../assets/images/teams/1.FSV Mainz 05.png'),
+  'SC Paderborn 07': require('../../assets/images/teams/SC Paderborn 07.png'),
+  '1. FC Union Berlin': require('../../assets/images/teams/1.FC Union Berlin.png'),
+  'Eintracht Frankfurt': require('../../assets/images/teams/Eintracht Frankfurt.png'),
+  '1. FC Köln': require('../../assets/images/teams/1.FC Köln.png'),
+  'TSG Hoffenheim': require('../../assets/images/teams/TSG 1899 Hoffenheim.png'),
+  'SV Elversberg': require('../../assets/images/teams/SV 07 Elversberg.png'),
+  'Bayer 04 Leverkusen': require('../../assets/images/teams/Bayer 04 Leverkusen.png'),
+};
+
+function getTeamLogo(team: string) {
+  return TEAM_LOGOS[team] || null;
+}
 
 function getResultType(home: number, away: number) {
   if (home > away) return 'HOME';
@@ -91,38 +136,6 @@ function calculateStandardPoints(
   return 0;
 }
 
-function calculateMOPoints(
-  tipHome: number,
-  tipAway: number,
-  realHome: number,
-  realAway: number
-) {
-  if (tipHome === realHome && tipAway === realAway) return 10;
-
-  const tipResult = getResultType(tipHome, tipAway);
-  const realResult = getResultType(realHome, realAway);
-
-  const sameResult = tipResult === realResult;
-
-  const tipDifference = Math.abs(tipHome - tipAway);
-  const realDifference = Math.abs(realHome - realAway);
-  const sameGoalDifference = tipDifference === realDifference;
-
-  const tipTotalGoals = tipHome + tipAway;
-  const realTotalGoals = realHome + realAway;
-  const sameTotalGoals = tipTotalGoals === realTotalGoals;
-
-  if (realResult === 'DRAW' && tipResult === 'DRAW') return 6;
-
-  if (sameResult && (sameGoalDifference || sameTotalGoals)) return 6;
-
-  if (sameResult) return 4;
-
-  if (sameGoalDifference || sameTotalGoals) return 2;
-
-  return 0;
-}
-
 function getDateKey(dateString: string) {
   return new Date(dateString).toISOString().slice(0, 10);
 }
@@ -135,8 +148,12 @@ function formatDate(dateString: string) {
   });
 }
 
-function formatTime(dateString: string) {
-  return new Date(dateString).toLocaleTimeString('sk-SK', {
+function formatTime(dateString?: string | null) {
+  if (!dateString) return 'Termín bude doplnený';
+
+  return new Date(dateString).toLocaleString('sk-SK', {
+    day: 'numeric',
+    month: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -156,13 +173,12 @@ export default function HomeScreen() {
 
   const [matches, setMatches] = useState<any[]>([]);
   const [myTips, setMyTips] = useState<any>({});
+  // Posledná potvrdená verzia tipu zo Supabase.
+  // Vďaka tomu vieme rozlíšiť ULOŽENÉ vs. ZMENENÉ – NEULOŽENÉ.
+  const [savedTips, setSavedTips] = useState<any>({});
+  const [savingTips, setSavingTips] = useState<Record<string, boolean>>({});
   const [allTips, setAllTips] = useState<any[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
-  const [championTip, setChampionTip] = useState('');
-const [championTips, setChampionTips] = useState<any[]>([]);
-const [championMessage, setChampionMessage] = useState('');
-const [championshipWinner, setChampionshipWinner] =
-  useState('');
 
   const [isResetMode, setIsResetMode] = useState(false);
 const [newPassword, setNewPassword] = useState('');
@@ -175,20 +191,20 @@ const [newPassword, setNewPassword] = useState('');
   'HISTORY' |
   'TABLES' |
   'STATS' |
-  'CHAMPION' |
   'PROFILE'
 >('UPCOMING'); 
 
-  const [selectedTable, setSelectedTable] = useState<
-    'STANDARD' | 'MO'
-  >('STANDARD');
-
-  const [selectedDay, setSelectedDay] =
-    useState<string | 'ALL'>('ALL');
 
   const [newHomeTeam, setNewHomeTeam] = useState('');
   const [newAwayTeam, setNewAwayTeam] = useState('');
   const [newKickoff, setNewKickoff] = useState('');
+  const [newRoundNumber, setNewRoundNumber] = useState('1');
+  const [selectedRound, setSelectedRound] = useState<number | 'ALL'>('ALL');
+
+  // Najbližšie: zobrazujeme iba jedno kolo naraz.
+  // Namiesto stoviek kariet je na obrazovke maximálne 9 zápasov.
+  const [selectedUpcomingRound, setSelectedUpcomingRound] =
+    useState<number | null>(null);
 
   const [resultInputs, setResultInputs] = useState<any>({});
   const [editInputs, setEditInputs] = useState<any>({});
@@ -199,8 +215,6 @@ const [newPassword, setNewPassword] = useState('');
 
    const { data } = supabase.auth.onAuthStateChange(
   (event, session) => {
-    console.log('AUTH EVENT:', event);
-console.log('AUTH SESSION:', !!session);
     setSession(session);
 
     if (event === 'PASSWORD_RECOVERY') {
@@ -230,6 +244,36 @@ console.log('AUTH SESSION:', !!session);
     };
   }, []);
 
+  // Kliknutie na notifikáciu otvorí rovno správnu časť appky.
+  useEffect(() => {
+    const openFromNotification = (response: Notifications.NotificationResponse | null) => {
+      if (!response) return;
+
+      const data = response.notification.request.content.data as any;
+      const round = Number(data?.round);
+
+      if (data?.view === 'TABLES') {
+        if (Number.isFinite(round)) setSelectedRound(round);
+        setMainView('TABLES');
+      }
+
+      if (data?.view === 'UPCOMING') {
+        if (Number.isFinite(round)) setSelectedUpcomingRound(round);
+        setMainView('UPCOMING');
+      }
+    };
+
+    Notifications.getLastNotificationResponseAsync()
+      .then(openFromNotification)
+      .catch(() => {});
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      openFromNotification
+    );
+
+    return () => subscription.remove();
+  }, []);
+
   const start = async () => {
     const { data } = await supabase.auth.getSession();
 
@@ -246,8 +290,10 @@ console.log('AUTH SESSION:', !!session);
     await loadMatches();
     await loadMyTips(userId);
     await loadAllTips();
-    await loadChampionTips(userId);
-    await loadChampionshipWinner();
+
+    // Push token registrujeme na pozadí po prihlásení.
+    // Ak používateľ notifikácie nepovolí, zvyšok appky funguje normálne.
+    void registerForPushNotifications(userId);
   };
 
   const register = async () => {
@@ -412,99 +458,14 @@ const updatePassword = async () => {
   };
 // ČASŤ 5/10
 
-  const requestNotificationPermission = async () => {
-    const permission =
-      await Notifications.requestPermissionsAsync();
-
-    return permission.granted;
-  };
-  const openNotificationSettings = async () => {
-  const permission =
-    await Notifications.requestPermissionsAsync();
-
-  if (permission.granted) {
-    setMessage('✅ Notifikácie sú povolené');
-    return;
-  }
-
-  setMessage(
-    'Notifikácie nie sú povolené. Otvor nastavenia aplikácie a povoľ ich.'
-  );
-
-  await Linking.openSettings();
-};
-
-  const scheduleMatchNotification = async (
-    homeTeam: string,
-    awayTeam: string,
-    kickoffAt: string
-  ) => {
-    const granted =
-      await requestNotificationPermission();
-
-    if (!granted) {
-      return;
-    }
-
-    const kickoffDate =
-      new Date(kickoffAt);
-
-    const notificationDate =
-      new Date(kickoffDate);
-
-    notificationDate.setDate(
-      notificationDate.getDate() - 1
-    );
-
-    notificationDate.setHours(17);
-    notificationDate.setMinutes(0);
-    notificationDate.setSeconds(0);
-    notificationDate.setMilliseconds(0);
-
-    if (notificationDate <= new Date()) {
-      return;
-    }
-
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '⚽ Zajtra sa hrá zápas',
-        body: `${homeTeam} vs ${awayTeam}. Nezabudni natipovať.`,
-      },
-      trigger: {
-        date: notificationDate,
-        channelId: 'default',
-      },
-    });
-  };
-
-  const sendInstantNotification = async (
-    title: string,
-    body: string
-  ) => {
-    const granted =
-      await requestNotificationPermission();
-
-    if (!granted) {
-      return;
-    }
-
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-      },
-      trigger: {
-        seconds: 3,
-        channelId: 'default',
-      },
-    });
-  };
 // ČASŤ 6/10
+
+
 
   const loadMatches = async () => {
     const { data, error } = await supabase
       .from('matches')
-      .select('*')
+      .select('id, home_team, away_team, kickoff_at, home_score, away_score, round_number')
       .order('kickoff_at', {
         ascending: true,
       });
@@ -523,6 +484,7 @@ const updatePassword = async () => {
         home_team: match.home_team || '',
         away_team: match.away_team || '',
         kickoff_at: match.kickoff_at || '',
+        round_number: String(match.round_number || 1),
       };
     });
 
@@ -532,7 +494,7 @@ const updatePassword = async () => {
   const loadMyTips = async (userId: string) => {
     const { data, error } = await supabase
       .from('predictions')
-      .select('*')
+      .select('id, match_id, user_id, home_tip, away_tip, points')
       .eq('user_id', userId);
 
     if (error) {
@@ -550,6 +512,7 @@ const updatePassword = async () => {
     });
 
     setMyTips(tipsObject);
+    setSavedTips(tipsObject);
   };
 
  const loadAllTips = async () => {
@@ -560,7 +523,7 @@ const updatePassword = async () => {
   while (true) {
     const { data, error } = await supabase
       .from('predictions')
-      .select('*')
+      .select('id, match_id, user_id, home_tip, away_tip, points')
       .range(from, from + pageSize - 1);
 
     if (error) {
@@ -586,7 +549,7 @@ const updatePassword = async () => {
   const loadProfiles = async () => {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*');
+    .select('id, username');
 
   if (error) {
     setMessage(error.message);
@@ -595,47 +558,9 @@ const updatePassword = async () => {
 
   setProfiles(data || []);
 };
-const loadChampionTips = async (userId?: string) => {
-  const { data, error } = await supabase
-    .from('champion_tips')
-    .select('*');
-
-  if (error) {
-    setMessage(error.message);
-    return;
-  }
-
-  setChampionTips(data || []);
-
-  const currentUserId = userId || session?.user?.id;
-
-  const myChampionTip = data?.find(
-    (tip) => tip.user_id === currentUserId
-  );
-
-  if (myChampionTip) {
-    setChampionTip(myChampionTip.team);
-  } else {
-    setChampionTip('');
-  }
-};
-const loadChampionshipWinner = async () => {
-  const { data, error } = await supabase
-    .from('championship_settings')
-    .select('*')
-    .eq('id', 'main')
-    .maybeSingle();
-
-  if (error) {
-    setMessage(error.message);
-    return;
-  }
-
-  if (data?.winner) {
-    setChampionshipWinner(data.winner);
-  }
-};
 // ČASŤ 7/10
+
+
 
   const updateTip = (
     matchId: string,
@@ -649,6 +574,13 @@ const loadChampionshipWinner = async () => {
         [field]: value,
       },
     }));
+
+    setMatchMessages((prev: any) => {
+      if (!prev[matchId]) return prev;
+      const next = { ...prev };
+      delete next[matchId];
+      return next;
+    });
   };
 
   const updateResultInput = (
@@ -667,7 +599,7 @@ const loadChampionshipWinner = async () => {
 
   const updateEditInput = (
     matchId: string,
-    field: 'home_team' | 'away_team' | 'kickoff_at',
+    field: 'home_team' | 'away_team' | 'kickoff_at' | 'round_number',
     value: string
   ) => {
     setEditInputs((prev: any) => ({
@@ -680,259 +612,120 @@ const loadChampionshipWinner = async () => {
   };
 
   const saveTip = async (matchId: string) => {
-    if (!session) return;
+    if (!session || savingTips[matchId]) return;
 
     const tip = myTips[matchId];
 
     if (!tip || tip.home === '' || tip.away === '') {
-      setMessage('Najprv vyplň oba výsledky.');
+      setMatchMessages((prev: any) => ({
+        ...prev,
+        [matchId]: '⚠️ Najprv vyplň oba výsledky.',
+      }));
       return;
     }
 
     const match = matches.find((item) => item.id === matchId);
 
     if (!match) {
-      setMessage('Zápas sa nenašiel.');
+      setMatchMessages((prev: any) => ({
+        ...prev,
+        [matchId]: '⚠️ Zápas sa nenašiel.',
+      }));
+      return;
+    }
+
+    if (!match.kickoff_at) {
+      setMatchMessages((prev: any) => ({
+        ...prev,
+        [matchId]: '⚠️ Termín zápasu ešte nie je určený.',
+      }));
       return;
     }
 
     if (new Date() >= new Date(match.kickoff_at)) {
-      setMessage('Tento zápas je už uzavretý.');
+      setMatchMessages((prev: any) => ({
+        ...prev,
+        [matchId]: '⚠️ Tento zápas je už uzavretý.',
+      }));
       return;
     }
 
-    const existingTip = await supabase
+    const homeTip = Number(tip.home);
+    const awayTip = Number(tip.away);
+
+    setSavingTips((prev) => ({ ...prev, [matchId]: true }));
+    setMatchMessages((prev: any) => ({
+      ...prev,
+      [matchId]: '⏳ Ukladám...',
+    }));
+
+    const { data, error } = await supabase
       .from('predictions')
-      .select('*')
-      .eq('match_id', matchId)
-      .eq('user_id', session.user.id)
-      .maybeSingle();
-
-    if (existingTip.data) {
-      const { error } = await supabase
-        .from('predictions')
-        .update({
-          home_tip: Number(tip.home),
-          away_tip: Number(tip.away),
-        })
-        .eq('match_id', matchId)
-        .eq('user_id', session.user.id);
-
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-    } else {
-      const { error } = await supabase
-        .from('predictions')
-        .insert({
+      .upsert(
+        {
           match_id: matchId,
           user_id: session.user.id,
-          home_tip: Number(tip.home),
-          away_tip: Number(tip.away),
-        });
+          home_tip: homeTip,
+          away_tip: awayTip,
+        },
+        { onConflict: 'match_id,user_id' }
+      )
+      .select('id, match_id, user_id, home_tip, away_tip, points')
+      .single();
 
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
+    setSavingTips((prev) => ({ ...prev, [matchId]: false }));
+
+    if (error) {
+      setMatchMessages((prev: any) => ({
+        ...prev,
+        [matchId]: `❌ ${error.message}`,
+      }));
+      return;
+    }
+
+    const saved = {
+      home: String(homeTip),
+      away: String(awayTip),
+    };
+
+    // Okamžitá lokálna aktualizácia – po jednom uložení už nesťahujeme
+    // znovu všetky moje tipy ani všetky tipy všetkých hráčov.
+    setSavedTips((prev: any) => ({
+      ...prev,
+      [matchId]: saved,
+    }));
+
+    setMyTips((prev: any) => ({
+      ...prev,
+      [matchId]: saved,
+    }));
+
+    if (data) {
+      setAllTips((prev: any[]) => {
+        const index = prev.findIndex(
+          (item) =>
+            item.match_id === matchId &&
+            item.user_id === session.user.id
+        );
+
+        if (index === -1) {
+          return [...prev, data];
+        }
+
+        const next = [...prev];
+        next[index] = data;
+        return next;
+      });
     }
 
     setMatchMessages((prev: any) => ({
       ...prev,
-      [matchId]: '✅ Tip uložený',
+      [matchId]: `✅ ULOŽENÉ ${homeTip} : ${awayTip}`,
     }));
-
-    await loadMyTips(session.user.id);
-    await loadAllTips();
   };
-  const saveChampionTip = async () => {
-  setMessage('');
-  setChampionMessage('');
-
-  if (!session) return;
-
-  if (championTip.trim() === '') {
-    setMessage('Vyber víťaza šampionátu.');
-    return;
-  }
-
-  const championTipDeadline =
-    new Date('2026-06-11T22:59:59');
-
-  if (new Date() > championTipDeadline) {
-    setMessage(
-      'Tip na víťaza šampionátu už nie je možné meniť.'
-    );
-    return;
-  }
-
-  const existingTip = await supabase
-    .from('champion_tips')
-    .select('*')
-    .eq('user_id', session.user.id)
-    .maybeSingle();
-
-  if (existingTip.data) {
-    const { error } = await supabase
-      .from('champion_tips')
-      .update({
-        team: championTip.trim(),
-      })
-      .eq('user_id', session.user.id);
-
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-  } else {
-    const { error } = await supabase
-      .from('champion_tips')
-      .insert({
-        user_id: session.user.id,
-        team: championTip.trim(),
-      });
-
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-  }
-
-  setChampionMessage('✅ Tip na víťaza šampionátu uložený');
-
-  await loadChampionTips(session.user.id);
-};
-const saveChampionshipWinner = async () => {
-  if (!isAdmin) return;
-
-  if (championshipWinner.trim() === '') {
-    setMessage('Vyber skutočného víťaza šampionátu.');
-    return;
-  }
-
-  const { error } = await supabase
-    .from('championship_settings')
-    .update({
-      winner: championshipWinner.trim(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', 'main');
-
-  if (error) {
-    setMessage(error.message);
-    return;
-  }
-
-  setMessage('✅ Víťaz šampionátu uložený');
-
-  await loadChampionshipWinner();
-};
 // ČASŤ 8/10
 
-  const getDayTopPlayersText = (
-    changedMatchId: string,
-    newHomeScore: number,
-    newAwayScore: number
-  ) => {
-    const changedMatch =
-      matches.find((item) => item.id === changedMatchId);
 
-    if (!changedMatch) return null;
-
-    const dayKey = getDateKey(changedMatch.kickoff_at);
-
-    const dayMatches = matches
-      .map((match) => {
-        if (match.id === changedMatchId) {
-          return {
-            ...match,
-            home_score: newHomeScore,
-            away_score: newAwayScore,
-          };
-        }
-
-        return match;
-      })
-      .filter(
-        (match) =>
-          getDateKey(match.kickoff_at) === dayKey
-      );
-
-    const allDayMatchesHaveResults =
-      dayMatches.length > 0 &&
-      dayMatches.every(
-        (match) =>
-          match.home_score !== null &&
-          match.away_score !== null
-      );
-
-    if (!allDayMatchesHaveResults) {
-      return null;
-    }
-
-    const standings = allTips.reduce(
-      (acc: any[], tip: any) => {
-        const match = dayMatches.find(
-          (item) => item.id === tip.match_id
-        );
-
-        if (!match) return acc;
-
-        const points = calculateMOPoints(
-          Number(tip.home_tip),
-          Number(tip.away_tip),
-          Number(match.home_score),
-          Number(match.away_score)
-        );
-
-        const profile = profiles.find(
-  (p) => p.id === tip.user_id
-);
-const name =
-  profile?.username ||
-  (tip.user_id === session?.user?.id
-    ? username
-    : 'Hráč');
-
-        const existingPlayer = acc.find(
-          (player) => player.userId === tip.user_id
-        );
-
-        if (existingPlayer) {
-          existingPlayer.points += points;
-        } else {
-          acc.push({
-            userId: tip.user_id,
-            name,
-            points,
-          });
-        }
-
-        return acc;
-      },
-      []
-    );
-
-    standings.sort((a, b) => b.points - a.points);
-
-    if (standings.length === 0) return null;
-
-    const maxPoints = standings[0].points;
-
-    const winners = standings.filter(
-      (player) => player.points === maxPoints
-    );
-
-    const names = winners
-      .map((player) => player.name)
-      .join(', ');
-
-    return {
-      day: formatDate(dayKey),
-      text: `${names} získal/i ${maxPoints} bodov.`,
-    };
-  };
 
   const saveResult = async (matchId: string) => {
     const result = resultInputs[matchId];
@@ -963,24 +756,6 @@ const name =
       [matchId]: '✅ Výsledok uložený',
     }));
 
-    const topInfo = getDayTopPlayersText(
-  matchId,
-  homeScore,
-  awayScore
-);
-
-    if (topInfo) {
-      await sendInstantNotification(
-        '🏆 Deň bol vyhodnotený',
-        `${topInfo.day} je kompletne vyhodnotený. Pozri si tabuľku.`
-      );
-
-      await sendInstantNotification(
-        '🥇 TOP hráč dňa',
-        topInfo.text
-      );
-    }
-
     setResultInputs((prev: any) => ({
       ...prev,
       [matchId]: {
@@ -1000,10 +775,9 @@ const name =
     if (
       !edit ||
       edit.home_team.trim() === '' ||
-      edit.away_team.trim() === '' ||
-      edit.kickoff_at.trim() === ''
+      edit.away_team.trim() === ''
     ) {
-      setMessage('Vyplň tímy aj čas výkopu.');
+      setMessage('Vyplň oba tímy.');
       return;
     }
 
@@ -1012,7 +786,8 @@ const name =
       .update({
         home_team: edit.home_team.trim(),
         away_team: edit.away_team.trim(),
-        kickoff_at: edit.kickoff_at.trim(),
+        kickoff_at: edit.kickoff_at?.trim() ? edit.kickoff_at.trim() : null,
+        round_number: Number(edit.round_number || 1),
       })
       .eq('id', matchId);
 
@@ -1020,12 +795,6 @@ const name =
       setMessage(error.message);
       return;
     }
-
-    await scheduleMatchNotification(
-      edit.home_team.trim(),
-      edit.away_team.trim(),
-      edit.kickoff_at.trim()
-    );
 
     setMatchMessages((prev: any) => ({
       ...prev,
@@ -1058,8 +827,8 @@ const name =
   };
 
   const addMatch = async () => {
-    if (!newHomeTeam || !newAwayTeam || !newKickoff) {
-      setMessage('Vyplň tímy a čas výkopu.');
+    if (!newHomeTeam || !newAwayTeam) {
+      setMessage('Vyplň oba tímy.');
       return;
     }
 
@@ -1068,8 +837,8 @@ const name =
       .insert({
         home_team: newHomeTeam,
         away_team: newAwayTeam,
-        kickoff_at: newKickoff,
-        round_number: 1,
+        kickoff_at: newKickoff.trim() ? newKickoff.trim() : null,
+        round_number: Number(newRoundNumber || 1),
       });
 
     if (error) {
@@ -1077,17 +846,12 @@ const name =
       return;
     }
 
-    await scheduleMatchNotification(
-      newHomeTeam,
-      newAwayTeam,
-      newKickoff
-    );
-
     setNewHomeTeam('');
     setNewAwayTeam('');
     setNewKickoff('');
+    setNewRoundNumber('1');
 
-    setMessage('✅ Zápas pridaný + notifikácia deň pred zápasom nastavená');
+    setMessage('✅ Zápas pridaný');
 
     await loadMatches();
   };
@@ -1097,398 +861,438 @@ const name =
 // ČASŤ 10/10
 
   const upcomingMatches = useMemo(() => {
-    return matches.filter((match) => {
-      const hasResult =
-        match.home_score !== null &&
-        match.away_score !== null;
-
-      return !hasResult;
-    });
+    return matches.filter(
+      (match) => match.home_score === null || match.away_score === null
+    );
   }, [matches]);
 
   const playedMatches = useMemo(() => {
-    return matches.filter((match) => {
-      const hasResult =
-        match.home_score !== null &&
-        match.away_score !== null;
-
-      return hasResult;
-    });
+    return matches.filter(
+      (match) => match.home_score !== null && match.away_score !== null
+    );
   }, [matches]);
 
-  const upcomingDays = useMemo(() => {
-    return upcomingMatches
-      .map((match) => getDateKey(match.kickoff_at))
-      .filter((day, index, arr) => arr.indexOf(day) === index)
-      .sort();
+  const allRounds = useMemo(() => {
+    return Array.from(
+      new Set(matches.map((match) => Number(match.round_number || 1)))
+    ).sort((a, b) => a - b);
+  }, [matches]);
+
+  const nextRound = useMemo(() => {
+    const upcomingRounds = Array.from(
+      new Set(upcomingMatches.map((match) => Number(match.round_number || 1)))
+    ).sort((a, b) => a - b);
+    return upcomingRounds[0] ?? null;
   }, [upcomingMatches]);
 
-  const playingDays = useMemo(() => {
-    return playedMatches
-      .map((match) => getDateKey(match.kickoff_at))
-      .filter((day, index, arr) => arr.indexOf(day) === index)
-      .sort()
-.reverse();
-  }, [playedMatches]);
-  const championTeams = CHAMPION_TEAMS;
+  // Kolo je kompletne vyhodnotené až vtedy, keď majú výsledok všetky jeho zápasy.
+  const completedRounds = useMemo(() => {
+    return allRounds
+      .filter((round) => {
+        const roundMatches = matches.filter(
+          (match) => Number(match.round_number || 1) === round
+        );
+
+        return (
+          roundMatches.length > 0 &&
+          roundMatches.every(
+            (match) => match.home_score !== null && match.away_score !== null
+          )
+        );
+      })
+      .sort((a, b) => b - a);
+  }, [allRounds, matches]);
+
+  const latestCompletedRound = completedRounds[0] ?? null;
+
+  // Posledné kompletne vyhodnotené kolo ostáva vľavo.
+  // Až po vyhodnotení ďalšieho kola sa staršie kolo presunie doprava.
+  // Príklad: po 1. kole = 1,2,3...; po 2. kole = 2,3,4...,1.
+  const roundOrder = useMemo(() => {
+    if (latestCompletedRound === null) {
+      return [...allRounds].sort((a, b) => a - b);
+    }
+
+    const future = allRounds
+      .filter((round) => round > latestCompletedRound)
+      .sort((a, b) => a - b);
+
+    const older = allRounds
+      .filter((round) => round < latestCompletedRound)
+      .sort((a, b) => b - a);
+
+    return [latestCompletedRound, ...future, ...older];
+  }, [allRounds, latestCompletedRound]);
+
+  const playedRounds = useMemo(() => {
+    const rounds = Array.from(
+      new Set(playedMatches.map((match) => Number(match.round_number || 1)))
+    ).sort((a, b) => b - a);
+
+    // História má tiež najnovšie vyhodnotené kolo úplne vľavo.
+    if (latestCompletedRound === null || !rounds.includes(latestCompletedRound)) {
+      return rounds;
+    }
+
+    return [
+      latestCompletedRound,
+      ...rounds.filter((round) => round !== latestCompletedRound),
+    ];
+  }, [playedMatches, latestCompletedRound]);
+
+  const upcomingRounds = useMemo(() => {
+    return Array.from(
+      new Set(upcomingMatches.map((match) => Number(match.round_number || 1)))
+    ).sort((a, b) => {
+      if (nextRound !== null) {
+        if (a === nextRound) return -1;
+        if (b === nextRound) return 1;
+      }
+      return a - b;
+    });
+  }, [upcomingMatches, nextRound]);
+
+  useEffect(() => {
+    if (upcomingRounds.length === 0) {
+      setSelectedUpcomingRound(null);
+      return;
+    }
+
+    setSelectedUpcomingRound((current) => {
+      if (current !== null && upcomingRounds.includes(current)) {
+        return current;
+      }
+
+      return nextRound ?? upcomingRounds[0];
+    });
+  }, [upcomingRounds, nextRound]);
+
+  const selectedUpcomingMatches = useMemo(() => {
+    if (selectedUpcomingRound === null) return [];
+
+    return upcomingMatches.filter(
+      (match) => Number(match.round_number || 1) === selectedUpcomingRound
+    );
+  }, [upcomingMatches, selectedUpcomingRound]);
+
+  const roundTipSummary = useMemo(() => {
+    const result = new Map<number, {
+      total: number;
+      saved: number;
+      missing: number;
+      matches: any[];
+    }>();
+
+    upcomingRounds.forEach((round) => {
+      const roundMatches = upcomingMatches.filter(
+        (match) => Number(match.round_number || 1) === round
+      );
+
+      // Do kontroly rátame len zápasy s určeným termínom.
+      // Zápas bez termínu sa ešte nedá tipovať.
+      const tipableMatches = roundMatches.filter((match) => Boolean(match.kickoff_at));
+
+      const saved = tipableMatches.filter((match) => {
+        const tip = savedTips[match.id];
+        return tip && tip.home !== '' && tip.away !== '';
+      }).length;
+
+      result.set(round, {
+        total: tipableMatches.length,
+        saved,
+        missing: Math.max(0, tipableMatches.length - saved),
+        matches: roundMatches,
+      });
+    });
+
+    return result;
+  }, [upcomingRounds, upcomingMatches, savedTips]);
 
   const tableMatches = useMemo(() => {
-    if (selectedDay === 'ALL') return playedMatches;
-
+    if (selectedRound === 'ALL') return playedMatches;
     return playedMatches.filter(
-      (match) => getDateKey(match.kickoff_at) === selectedDay
+      (match) => Number(match.round_number || 1) === selectedRound
     );
-  }, [playedMatches, selectedDay]);
+  }, [playedMatches, selectedRound]);
 
   const historyMatches = useMemo(() => {
-    if (selectedDay === 'ALL') return playedMatches;
-
+    if (selectedRound === 'ALL') return playedMatches;
     return playedMatches.filter(
-      (match) => getDateKey(match.kickoff_at) === selectedDay
+      (match) => Number(match.round_number || 1) === selectedRound
     );
-  }, [playedMatches, selectedDay]);
+  }, [playedMatches, selectedRound]);
 
-  const getPointsForSystem = (
-    tip: any,
-    match: any,
-    system: 'STANDARD' | 'MO'
-  ) => {
-    if (
-      match.home_score === null ||
-      match.away_score === null
-    ) {
-      return null;
-    }
+  // Rýchle indexy – namiesto opakovaných filter/find cez všetky tipy.
+  const profileNameById = useMemo(() => {
+    const result = new Map<string, string>();
+    profiles.forEach((profile) => {
+      result.set(profile.id, profile.username || 'Hráč');
+    });
+    return result;
+  }, [profiles]);
 
-    if (system === 'STANDARD') {
-      return calculateStandardPoints(
-        Number(tip.home_tip),
-        Number(tip.away_tip),
-        Number(match.home_score),
-        Number(match.away_score)
-      );
-    }
-
-    return calculateMOPoints(
-      Number(tip.home_tip),
-      Number(tip.away_tip),
-      Number(match.home_score),
-      Number(match.away_score)
-    );
-  };
-
-  const buildStandings = (system: 'STANDARD' | 'MO') => {
-  const list = profiles
-    .map((profile) => {
-      const playerTips = allTips.filter(
-        (tip) => tip.user_id === profile.id
-      );
-
-      let points = 0;
-
-      playerTips.forEach((tip) => {
-        const match = tableMatches.find(
-          (item) => item.id === tip.match_id
-        );
-
-        if (
-          !match ||
-          match.home_score === null ||
-          match.away_score === null
-        ) {
-          return;
-        }
-
-        points += getPointsForSystem(tip, match, system) || 0;
-      });
-
-      const championBonus =
-        selectedDay === 'ALL' &&
-        championshipWinner.trim() !== '' &&
-        championTips.some(
-          (tip) =>
-            tip.user_id === profile.id &&
-            tip.team.trim() === championshipWinner.trim()
-        )
-          ? 10
-          : 0;
-
-      points += championBonus;
-
-      return {
-        userId: profile.id,
-        name: profile.username || 'Hráč',
-        points,
-      };
-    })
-    .filter((player) => player.points > 0);
-
-  return list.sort((a, b) => b.points - a.points);
-};
-
-  const standardStandings = buildStandings('STANDARD');
-  const moStandings = buildStandings('MO');
-
-  const activeStandings =
-    selectedTable === 'STANDARD'
-      ? standardStandings
-      : moStandings;
-
-  const topDayPlayer =
-    selectedDay === 'ALL' || moStandings.length === 0
-      ? null
-      : moStandings[0];
-
-  const playerStats = profiles
-  .map((profile) => {
-    const playerTips = allTips.filter(
-      (tip) => tip.user_id === profile.id
-    );
-
-    let exactResults = 0;
-    let standardPoints = 0;
-    let moPoints = 0;
-    let evaluatedTips = 0;
-let correctResultType = 0;
-let bestDay = 0;
-let wonDays = 0;
-const dailyProgress: any[] = [];
-
-    playerTips.forEach((tip) => {
-      const match = playedMatches.find(
-        (item) => item.id === tip.match_id
-      );
-
-      if (!match) return;
-
-      evaluatedTips += 1;
-
-      if (
-        Number(tip.home_tip) === Number(match.home_score) &&
-        Number(tip.away_tip) === Number(match.away_score)
-      ) {
-        exactResults += 1;
+  const tipsByMatch = useMemo(() => {
+    const result = new Map<string, any[]>();
+    allTips.forEach((tip) => {
+      const list = result.get(tip.match_id);
+      if (list) {
+        list.push(tip);
+      } else {
+        result.set(tip.match_id, [tip]);
       }
-      if (
-  getResultType(Number(tip.home_tip), Number(tip.away_tip)) ===
-  getResultType(Number(match.home_score), Number(match.away_score))
-) {
-  correctResultType += 1;
-}
-
-      standardPoints += calculateStandardPoints(
-        Number(tip.home_tip),
-        Number(tip.away_tip),
-        Number(match.home_score),
-        Number(match.away_score)
-      );
-
-      moPoints += calculateMOPoints(
-        Number(tip.home_tip),
-        Number(tip.away_tip),
-        Number(match.home_score),
-        Number(match.away_score)
-      );
     });
-    const playedDays = playedMatches
-  .map((match) => getDateKey(match.kickoff_at))
-  .filter((day, index, arr) => arr.indexOf(day) === index);
+    return result;
+  }, [allTips]);
 
-playedDays.forEach((day) => {
-  const matchesForDay = playedMatches.filter(
-    (match) => getDateKey(match.kickoff_at) === day
-  );
-
-  let dayPoints = 0;
-
-  matchesForDay.forEach((match) => {
-    const tip = playerTips.find(
-      (item) => item.match_id === match.id
-    );
-
-    if (!tip) return;
-
-    dayPoints += calculateMOPoints(
-      Number(tip.home_tip),
-      Number(tip.away_tip),
-      Number(match.home_score),
-      Number(match.away_score)
-    );
-  });
-  const dayResults = profiles.map((otherProfile) => {
-    const otherTips = allTips.filter(
-      (tip) => tip.user_id === otherProfile.id
-    );
-
-    let otherDayPoints = 0;
-
-    matchesForDay.forEach((match) => {
-      const tip = otherTips.find(
-        (item) => item.match_id === match.id
-      );
-
-      if (!tip) return;
-
-      otherDayPoints += calculateMOPoints(
-        Number(tip.home_tip),
-        Number(tip.away_tip),
-        Number(match.home_score),
-        Number(match.away_score)
-      );
+  const tipsByUser = useMemo(() => {
+    const result = new Map<string, any[]>();
+    allTips.forEach((tip) => {
+      const list = result.get(tip.user_id);
+      if (list) {
+        list.push(tip);
+      } else {
+        result.set(tip.user_id, [tip]);
+      }
     });
+    return result;
+  }, [allTips]);
 
-    return {
-      userId: otherProfile.id,
-      points: otherDayPoints,
-    };
-  });
+  const tipByUserAndMatch = useMemo(() => {
+    const result = new Map<string, Map<string, any>>();
+    allTips.forEach((tip) => {
+      let userMap = result.get(tip.user_id);
+      if (!userMap) {
+        userMap = new Map<string, any>();
+        result.set(tip.user_id, userMap);
+      }
+      userMap.set(tip.match_id, tip);
+    });
+    return result;
+  }, [allTips]);
 
-  const maxDayPoints = Math.max(
-    ...dayResults.map((item) => item.points)
-  );
+  const playedMatchById = useMemo(() => {
+    const result = new Map<string, any>();
+    playedMatches.forEach((match) => result.set(match.id, match));
+    return result;
+  }, [playedMatches]);
 
-  if (
-    dayPoints === maxDayPoints &&
-    maxDayPoints > 0
-  ) {
-    wonDays += 1;
-  }
-  dailyProgress.push({
-  day,
-  points: dayPoints,
-});
-  if (dayPoints > bestDay) {
-    bestDay = dayPoints;
-  }
-});
-const averagePoints =
-  evaluatedTips === 0
-    ? 0
-    : Math.round((moPoints / evaluatedTips) * 10) / 10;
-const championBonus =
-  championshipWinner &&
-  championTips.find(
-    (tip) =>
-      tip.user_id === profile.id &&
-      tip.team === championshipWinner
-  )
-    ? 10
-    : 0;
+  const playedMatchesByRound = useMemo(() => {
+    const result = new Map<number, any[]>();
+    playedMatches.forEach((match) => {
+      const round = Number(match.round_number || 1);
+      const list = result.get(round);
+      if (list) {
+        list.push(match);
+      } else {
+        result.set(round, [match]);
+      }
+    });
+    return result;
+  }, [playedMatches]);
 
-standardPoints += championBonus;
-moPoints += championBonus;
-    const successRate =
-      evaluatedTips === 0
-        ? 0
-        : Math.round((exactResults / evaluatedTips) * 100);
-    const truthTableRate =
-  evaluatedTips === 0
-    ? 0
-    : Math.round((correctResultType / evaluatedTips) * 100);
-
-    return {
-      userId: profile.id,
-      name: profile.username || 'Hráč',
-      tips: playerTips.length,
-      evaluatedTips,
-      exactResults,
-      successRate,
-      correctResultType,
-truthTableRate,
-      standardPoints,
-      moPoints,
-averagePoints,
-bestDay,
-wonDays,
-dailyProgress,
-    };
-  })
-  .sort((a, b) => b.moPoints - a.moPoints);
-
-  const topPlayersHistory = playingDays
-  .map((day) => {
-    const matchesForDay = playedMatches.filter(
-      (match) => getDateKey(match.kickoff_at) === day
-    );
-
-    const dayStandings = profiles
+  const buildStandingsForMatches = (
+    matchesForTable: any[],
+    profilesList: any[],
+    tipIndex: Map<string, Map<string, any>>
+  ) => {
+    return profilesList
       .map((profile) => {
-        const playerTips = allTips.filter(
-          (tip) => tip.user_id === profile.id
-        );
+        const userTips = tipIndex.get(profile.id);
+        let exactTips = 0;
+        let onePointTips = 0;
 
-        let points = 0;
-
-        matchesForDay.forEach((match) => {
-          const tip = playerTips.find(
-            (item) => item.match_id === match.id
-          );
-
+        matchesForTable.forEach((match) => {
+          const tip = userTips?.get(match.id);
           if (!tip) return;
 
-          points += calculateMOPoints(
+          const points = calculateStandardPoints(
             Number(tip.home_tip),
             Number(tip.away_tip),
             Number(match.home_score),
             Number(match.away_score)
           );
+
+          if (points === 3) exactTips += 1;
+          if (points === 1) onePointTips += 1;
         });
+
+        const truthTable = exactTips + onePointTips;
+        const points = exactTips * 3 + onePointTips;
 
         return {
           userId: profile.id,
           name: profile.username || 'Hráč',
+          exactTips,
+          onePointTips,
+          truthTable,
           points,
         };
       })
-      .filter((player) => player.points > 0)
-      .sort((a, b) => b.points - a.points);
+      .filter((player) => player.exactTips > 0 || player.onePointTips > 0)
+      .sort((a, b) =>
+        b.points - a.points ||
+        b.exactTips - a.exactTips ||
+        b.truthTable - a.truthTable ||
+        a.name.localeCompare(b.name, 'sk')
+      );
+  };
 
-    if (dayStandings.length === 0) {
-      return null;
-    }
+  const activeStandings = useMemo(
+    () => buildStandingsForMatches(tableMatches, profiles, tipByUserAndMatch),
+    [tableMatches, profiles, tipByUserAndMatch]
+  );
 
-    const maxPoints = dayStandings[0].points;
+  const roundStandings = useMemo(() => {
+    const result: Record<number, any[]> = {};
+    playedRounds.forEach((round) => {
+      result[round] = buildStandingsForMatches(
+        playedMatchesByRound.get(round) || [],
+        profiles,
+        tipByUserAndMatch
+      );
+    });
+    return result;
+  }, [playedRounds, playedMatchesByRound, profiles, tipByUserAndMatch]);
 
-    const winners = dayStandings.filter(
-      (player) => player.points === maxPoints
-    );
+  const playerStats = useMemo(() => {
+    return profiles
+      .map((profile) => {
+        const playerTips = tipsByUser.get(profile.id) || [];
+        let exactResults = 0;
+        let onePointTips = 0;
+        let evaluatedTips = 0;
+        let totalPoints = 0;
+        let bestRound = 0;
+        let bestRoundPoints = 0;
+        let wonRounds = 0;
 
-    return {
-      day,
-      names: winners.map((player) => player.name).join(', '),
-      points: maxPoints,
-    };
-  })
-  .filter(Boolean);
+        playerTips.forEach((tip) => {
+          const match = playedMatchById.get(tip.match_id);
+          if (!match) return;
+
+          evaluatedTips += 1;
+          const points = calculateStandardPoints(
+            Number(tip.home_tip),
+            Number(tip.away_tip),
+            Number(match.home_score),
+            Number(match.away_score)
+          );
+          totalPoints += points;
+          if (points === 3) exactResults += 1;
+          if (points === 1) onePointTips += 1;
+        });
+
+        playedRounds.forEach((round) => {
+          const standings = roundStandings[round] || [];
+          const player = standings.find((item) => item.userId === profile.id);
+          const roundPoints = player?.points || 0;
+
+          if (roundPoints > bestRoundPoints) {
+            bestRoundPoints = roundPoints;
+            bestRound = round;
+          }
+
+          if (
+            standings.length > 0 &&
+            roundPoints > 0 &&
+            roundPoints === standings[0].points
+          ) {
+            wonRounds += 1;
+          }
+        });
+
+        const successRate =
+          evaluatedTips === 0
+            ? 0
+            : Math.round((exactResults / evaluatedTips) * 100);
+
+        return {
+          userId: profile.id,
+          name: profile.username || 'Hráč',
+          tips: playerTips.length,
+          evaluatedTips,
+          exactResults,
+          onePointTips,
+          successRate,
+          truthTable: exactResults + onePointTips,
+          totalPoints,
+          bestRound,
+          bestRoundPoints,
+          wonRounds,
+        };
+      })
+      .sort((a, b) =>
+        b.totalPoints - a.totalPoints ||
+        b.exactResults - a.exactResults ||
+        b.truthTable - a.truthTable ||
+        a.name.localeCompare(b.name, 'sk')
+      );
+  }, [profiles, tipsByUser, playedMatchById, playedRounds, roundStandings]);
 
   const renderMatchCard = (match: any) => {
+    const hasKickoff = Boolean(match.kickoff_at);
     const isLocked =
-      new Date() >= new Date(match.kickoff_at);
+      hasKickoff && new Date() >= new Date(match.kickoff_at);
 
     const tip = myTips[match.id];
+    const savedTip = savedTips[match.id];
+    const isSavingTip = Boolean(savingTips[match.id]);
+    const hasSavedTip =
+      Boolean(savedTip) &&
+      savedTip.home !== '' &&
+      savedTip.away !== '';
+    const isTipDirty =
+      Boolean(tip) &&
+      tip.home !== '' &&
+      tip.away !== '' &&
+      (
+        !savedTip ||
+        String(tip.home) !== String(savedTip.home) ||
+        String(tip.away) !== String(savedTip.away)
+      );
 
     const hasResult =
       match.home_score !== null &&
       match.away_score !== null;
 
-    const tipsForThisMatch = allTips.filter(
-      (item) => item.match_id === match.id
-    );
+    const tipsForThisMatch = tipsByMatch.get(match.id) || [];
 
     return (
       <View key={match.id} style={styles.matchCard}>
         <Text style={styles.matchStatus}>
           {hasResult
             ? 'ODOHRANÉ'
-            : isLocked
-              ? 'UZAVRETÉ'
-              : 'OTVORENÉ'}
+            : !hasKickoff
+              ? 'TERMÍN NEURČENÝ'
+              : isLocked
+                ? 'UZAVRETÉ'
+                : 'OTVORENÉ'}
         </Text>
 
         <View style={styles.teamsRow}>
-          <Text style={styles.teamName}>{match.home_team}</Text>
+          <View style={styles.teamSide}>
+            {getTeamLogo(match.home_team) && (
+              <Image
+                source={getTeamLogo(match.home_team)}
+                style={styles.teamLogo}
+                resizeMode="contain"
+              />
+            )}
+            <Text style={styles.teamName}>{match.home_team}</Text>
+          </View>
+
           <Text style={styles.vs}>vs</Text>
-          <Text style={styles.teamName}>{match.away_team}</Text>
+
+          <View style={styles.teamSide}>
+            {getTeamLogo(match.away_team) && (
+              <Image
+                source={getTeamLogo(match.away_team)}
+                style={styles.teamLogo}
+                resizeMode="contain"
+              />
+            )}
+            <Text style={styles.teamName}>{match.away_team}</Text>
+          </View>
         </View>
 
         <Text style={styles.kickoff}>{formatTime(match.kickoff_at)}</Text>
@@ -1566,11 +1370,21 @@ dailyProgress,
 
             <TextInput
               style={styles.inputFull}
-              placeholder="Výkop"
+              placeholder="Výkop (môže zostať prázdny)"
               value={editInputs[match.id]?.kickoff_at || ''}
               onChangeText={(text) =>
                 updateEditInput(match.id, 'kickoff_at', text)
               }
+            />
+
+            <TextInput
+              style={styles.inputFull}
+              placeholder="Číslo kola"
+              value={editInputs[match.id]?.round_number || '1'}
+              onChangeText={(text) =>
+                updateEditInput(match.id, 'round_number', text)
+              }
+              keyboardType="numeric"
             />
 
             <Pressable
@@ -1591,7 +1405,13 @@ dailyProgress,
           </View>
         )}
 
-        {!hasResult && !isLocked && (
+        {!hasResult && !hasKickoff && (
+          <Text style={styles.notice}>
+            Termín zápasu ešte nie je určený. Tipovanie sa otvorí po doplnení dátumu a času výkopu.
+          </Text>
+        )}
+
+        {!hasResult && hasKickoff && !isLocked && (
           <>
             <Text style={styles.subheading}>Tvoj tip</Text>
 
@@ -1616,15 +1436,51 @@ dailyProgress,
             </View>
 
             <Pressable
-              style={styles.primaryButton}
+              style={[
+                styles.primaryButton,
+                isSavingTip && styles.disabledButton,
+              ]}
+              disabled={isSavingTip}
               onPress={() => saveTip(match.id)}
             >
-              <Text style={styles.primaryButtonText}>Uložiť tip</Text>
+              <Text style={styles.primaryButtonText}>
+                {isSavingTip ? 'Ukladám...' : 'Uložiť tip'}
+              </Text>
             </Pressable>
 
-            {matchMessages[match.id] && (
+            {isTipDirty && !isSavingTip && (
+              <View style={styles.unsavedBoxSmall}>
+                <Text style={styles.unsavedText}>
+                  ⚠️ ZMENENÉ – NEULOŽENÉ
+                </Text>
+              </View>
+            )}
+
+            {!isTipDirty && hasSavedTip && !matchMessages[match.id] && (
               <View style={styles.successBoxSmall}>
                 <Text style={styles.successText}>
+                  ✅ ULOŽENÉ {savedTip.home} : {savedTip.away}
+                </Text>
+              </View>
+            )}
+
+            {matchMessages[match.id] && (
+              <View
+                style={
+                  matchMessages[match.id].startsWith('❌') ||
+                  matchMessages[match.id].startsWith('⚠️')
+                    ? styles.unsavedBoxSmall
+                    : styles.successBoxSmall
+                }
+              >
+                <Text
+                  style={
+                    matchMessages[match.id].startsWith('❌') ||
+                    matchMessages[match.id].startsWith('⚠️')
+                      ? styles.unsavedText
+                      : styles.successText
+                  }
+                >
                   {matchMessages[match.id]}
                 </Text>
               </View>
@@ -1648,19 +1504,22 @@ dailyProgress,
               <Text style={styles.notice}>Zatiaľ nie sú žiadne tipy.</Text>
             ) : (
               tipsForThisMatch.map((item) => {
-                const standard = getPointsForSystem(item, match, 'STANDARD');
-                const mo = getPointsForSystem(item, match, 'MO');
+                const points = hasResult
+                  ? calculateStandardPoints(
+                      Number(item.home_tip),
+                      Number(item.away_tip),
+                      Number(match.home_score),
+                      Number(match.away_score)
+                    )
+                  : null;
 
                 return (
                   <View key={item.id} style={styles.tipLine}>
                     <Text style={styles.tipPlayer}>
-                      {
-  profiles.find((p) => p.id === item.user_id)
-    ?.username ||
-  (item.user_id === session.user.id
-    ? username || 'Ja'
-    : 'Hráč')
-}
+                      {profileNameById.get(item.user_id) ||
+                        (item.user_id === session.user.id
+                          ? username || 'Ja'
+                          : 'Hráč')}
                     </Text>
 
                     <Text style={styles.tipScore}>
@@ -1668,7 +1527,7 @@ dailyProgress,
                     </Text>
 
                     <Text style={styles.tipPoints}>
-                      S:{standard ?? '-'} / M:{mo ?? '-'}
+                      {points === null ? '-' : `${points} b.`}
                     </Text>
                   </View>
                 );
@@ -1736,8 +1595,8 @@ dailyProgress,
       <View style={styles.authContainer}>
         <View style={styles.authCard}>
           <Text style={styles.logo}>🏆</Text>
-          <Text style={styles.authTitle}>MS vo futbale</Text>
-          <Text style={styles.authSeason}>2026</Text>
+          <Text style={styles.authTitle}>Nemecká Bundesliga</Text>
+          <Text style={styles.authSeason}>2026/2027</Text>
           <Text style={styles.authSubtitle}>
             Tipovačka presných výsledkov
           </Text>
@@ -1855,8 +1714,8 @@ dailyProgress,
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerSmall}>Majstrovstvá sveta</Text>
-        <Text style={styles.headerTitle}>FIFA World Cup 2026</Text>
+        <Text style={styles.headerSmall}>Tipovačka</Text>
+        <Text style={styles.headerTitle}>Nemecká Bundesliga 2026/2027</Text>
         <Text style={styles.headerPlayer}>Hráč: {username}</Text>
       </View>
 
@@ -1983,22 +1842,7 @@ dailyProgress,
               Profil
             </Text>
           </Pressable>
-          <Pressable
-  style={[
-    styles.switchButton,
-    mainView === 'CHAMPION' && styles.switchButtonActive,
-  ]}
-  onPress={() => setMainView('CHAMPION')}
->
-  <Text
-    style={[
-      styles.switchText,
-      mainView === 'CHAMPION' && styles.switchTextActive,
-    ]}
-  >
-    Šampión
-  </Text>
-</Pressable>
+
         </View>
       </View>
 
@@ -2008,23 +1852,31 @@ dailyProgress,
 
           <TextInput
             style={styles.inputFull}
-            placeholder="Domáci tím, napr. 🇸🇰 Slovensko"
+            placeholder="Domáci tím"
             value={newHomeTeam}
             onChangeText={setNewHomeTeam}
           />
 
           <TextInput
             style={styles.inputFull}
-            placeholder="Hostia, napr. 🇧🇷 Brazília"
+            placeholder="Hostia"
             value={newAwayTeam}
             onChangeText={setNewAwayTeam}
           />
 
           <TextInput
             style={styles.inputFull}
-            placeholder="Výkop: 2026-06-11 21:00:00"
+            placeholder="Výkop – môže zostať prázdny"
             value={newKickoff}
             onChangeText={setNewKickoff}
+          />
+
+          <TextInput
+            style={styles.inputFull}
+            placeholder="Číslo kola (1-34)"
+            value={newRoundNumber}
+            onChangeText={setNewRoundNumber}
+            keyboardType="numeric"
           />
 
           <Pressable style={styles.primaryButton} onPress={addMatch}>
@@ -2034,160 +1886,155 @@ dailyProgress,
       )}
 {/* ČASŤ 12/12 */}
 
-{mainView === 'CHAMPION' && (
-  <>
-    <View style={styles.tableCard}>
-      <Text style={styles.tableTitle}>
-        🏆 Tip na víťaza šampionátu
-      </Text>
-
-      <Text style={styles.notice}>
-        Tip môžeš meniť do 11.6.2026 22:59:59.
-      </Text>
-
-      <Text style={styles.notice}>
-        Vybraný tím: {championTip || 'zatiaľ nevybraný'}
-      </Text>
-
-      <View style={styles.championGrid}>
-        {championTeams.map((team) => (
-          <Pressable
-            key={team}
-            style={[
-              styles.championButton,
-              championTip === team && styles.championButtonActive,
-            ]}
-            onPress={() => setChampionTip(team)}
-          >
-            <Text
-              style={[
-                styles.championButtonText,
-                championTip === team && styles.championButtonTextActive,
-              ]}
-            >
-              {team}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Pressable style={styles.primaryButton} onPress={saveChampionTip}>
-        <Text style={styles.primaryButtonText}>
-          Uložiť tip na víťaza
-        </Text>
-      </Pressable>
-      {championMessage !== '' && (
-  <View style={styles.successBoxSmall}>
-    <Text style={styles.successText}>
-      {championMessage}
-    </Text>
-  </View>
-)}
-    </View>
-
-    {isAdmin && (
-      <View style={styles.adminCard}>
-        <Text style={styles.adminTitle}>
-          🏆 Skutočný víťaz šampionátu
-        </Text>
-
-        <Text style={styles.notice}>
-          Vybraný víťaz: {championshipWinner || 'zatiaľ nevybraný'}
-        </Text>
-
-        <View style={styles.championGrid}>
-          {championTeams.map((team) => (
-            <Pressable
-              key={team}
-              style={[
-                styles.championButton,
-                championshipWinner === team && styles.championButtonActive,
-              ]}
-              onPress={() => setChampionshipWinner(team)}
-            >
-              <Text
-                style={[
-                  styles.championButtonText,
-                  championshipWinner === team && styles.championButtonTextActive,
-                ]}
-              >
-                {team}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <Pressable style={styles.primaryButton} onPress={saveChampionshipWinner}>
-          <Text style={styles.primaryButtonText}>
-            Uložiť víťaza šampionátu
-          </Text>
-        </Pressable>
-      </View>
-    )}
-  </>
-)}
       {mainView === 'UPCOMING' && (
         <>
-          <Text style={styles.sectionTitle}>⚽ Najbližšie zápasy</Text>
+          <Text style={styles.sectionTitle}>⚽ Kolá Bundesligy</Text>
 
-          {upcomingDays.length === 0 ? (
+          {upcomingRounds.length === 0 ? (
             <Text style={styles.notice}>Žiadne najbližšie zápasy.</Text>
           ) : (
-            upcomingDays.map((day) => (
-              <View key={day}>
-                <View style={styles.dateHeader}>
-                  <Text style={styles.dateHeaderText}>
-                    📅 {formatDate(day)}
-                  </Text>
-                </View>
+            <>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.upcomingRoundScroller}
+                contentContainerStyle={styles.upcomingRoundScrollerContent}
+              >
+                {upcomingRounds.map((round) => (
+                  <Pressable
+                    key={`upcoming-round-${round}`}
+                    style={[
+                      styles.roundButton,
+                      selectedUpcomingRound === round && styles.roundButtonActive,
+                    ]}
+                    onPress={() => setSelectedUpcomingRound(round)}
+                  >
+                    <Text
+                      style={[
+                        styles.roundText,
+                        selectedUpcomingRound === round && styles.roundTextActive,
+                      ]}
+                    >
+                      {round === nextRound ? '➡️ ' : ''}{round}. kolo
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
 
-                {upcomingMatches
-                  .filter((match) => getDateKey(match.kickoff_at) === day)
-                  .map(renderMatchCard)}
-              </View>
-            ))
+              {selectedUpcomingRound !== null && (
+                <>
+                  <View style={styles.dateHeader}>
+                    <Text style={styles.dateHeaderText}>
+                      {selectedUpcomingRound === nextRound ? '➡️ ' : ''}
+                      {selectedUpcomingRound}. kolo
+                    </Text>
+                  </View>
+
+                  {(() => {
+                    const summary = roundTipSummary.get(selectedUpcomingRound);
+                    if (!summary) return null;
+
+                    return (
+                      <View style={styles.tipSummaryCard}>
+                        <Text style={styles.tipSummaryTitle}>
+                          Kontrola tipov kola
+                        </Text>
+
+                        {summary.total === 0 ? (
+                          <Text style={styles.tipSummaryNeutral}>
+                            ⏳ Zatiaľ nie je určený termín žiadneho zápasu.
+                          </Text>
+                        ) : summary.missing === 0 ? (
+                          <Text style={styles.tipSummaryComplete}>
+                            ✅ Všetkých {summary.total} zápasov máš natipovaných
+                          </Text>
+                        ) : (
+                          <Text style={styles.tipSummaryMissing}>
+                            ⚠️ Natipované {summary.saved} / {summary.total} · chýba {summary.missing}
+                          </Text>
+                        )}
+
+                        {summary.matches.map((item) => {
+                          const saved = savedTips[item.id];
+                          const hasKickoff = Boolean(item.kickoff_at);
+                          const hasSaved =
+                            Boolean(saved) &&
+                            saved.home !== '' &&
+                            saved.away !== '';
+
+                          return (
+                            <View key={`summary-${item.id}`} style={styles.tipSummaryRow}>
+                              <Text style={styles.tipSummaryMatch} numberOfLines={1}>
+                                {item.home_team} – {item.away_team}
+                              </Text>
+                              <Text
+                                style={
+                                  !hasKickoff
+                                    ? styles.tipSummaryNeutral
+                                    : hasSaved
+                                      ? styles.tipSummaryComplete
+                                      : styles.tipSummaryMissing
+                                }
+                              >
+                                {!hasKickoff
+                                  ? '⏳ TERMÍN'
+                                  : hasSaved
+                                    ? `✅ ${saved.home}:${saved.away}`
+                                    : '⚠️ CHÝBA'}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    );
+                  })()}
+
+                  {selectedUpcomingMatches.map(renderMatchCard)}
+                </>
+              )}
+            </>
           )}
         </>
       )}
 
       {mainView === 'HISTORY' && (
         <>
-          <Text style={styles.sectionTitle}>📚 História hracích dní</Text>
+          <Text style={styles.sectionTitle}>📚 História kôl</Text>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <Pressable
               style={[
                 styles.roundButton,
-                selectedDay === 'ALL' && styles.roundButtonActive,
+                selectedRound === 'ALL' && styles.roundButtonActive,
               ]}
-              onPress={() => setSelectedDay('ALL')}
+              onPress={() => setSelectedRound('ALL')}
             >
               <Text
                 style={[
                   styles.roundText,
-                  selectedDay === 'ALL' && styles.roundTextActive,
+                  selectedRound === 'ALL' && styles.roundTextActive,
                 ]}
               >
                 Všetko
               </Text>
             </Pressable>
 
-            {playingDays.map((day) => (
+            {playedRounds.map((round) => (
               <Pressable
-                key={day}
+                key={round}
                 style={[
                   styles.roundButton,
-                  selectedDay === day && styles.roundButtonActive,
+                  selectedRound === round && styles.roundButtonActive,
                 ]}
-                onPress={() => setSelectedDay(day)}
+                onPress={() => setSelectedRound(round)}
               >
                 <Text
                   style={[
                     styles.roundText,
-                    selectedDay === day && styles.roundTextActive,
+                    selectedRound === round && styles.roundTextActive,
                   ]}
                 >
-                  {formatDate(day)}
+                  {round}. kolo
                 </Text>
               </Pressable>
             ))}
@@ -2204,100 +2051,51 @@ dailyProgress,
       {mainView === 'TABLES' && (
         <>
           <View style={styles.switchCard}>
-            <Text style={styles.switchTitle}>Vyhodnocovanie</Text>
-
-            <View style={styles.switchRow}>
-              <Pressable
-                style={[
-                  styles.switchButton,
-                  selectedTable === 'STANDARD' && styles.switchButtonActive,
-                ]}
-                onPress={() => setSelectedTable('STANDARD')}
-              >
-                <Text
-                  style={[
-                    styles.switchText,
-                    selectedTable === 'STANDARD' && styles.switchTextActive,
-                  ]}
-                >
-                  STANDARD
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.switchButton,
-                  selectedTable === 'MO' && styles.switchButtonActive,
-                ]}
-                onPress={() => setSelectedTable('MO')}
-              >
-                <Text
-                  style={[
-                    styles.switchText,
-                    selectedTable === 'MO' && styles.switchTextActive,
-                  ]}
-                >
-                  M.O.
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={styles.switchCard}>
-            <Text style={styles.switchTitle}>Hrací deň</Text>
+            <Text style={styles.switchTitle}>Kolo</Text>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <Pressable
                 style={[
                   styles.roundButton,
-                  selectedDay === 'ALL' && styles.roundButtonActive,
+                  selectedRound === 'ALL' && styles.roundButtonActive,
                 ]}
-                onPress={() => setSelectedDay('ALL')}
+                onPress={() => setSelectedRound('ALL')}
               >
                 <Text
                   style={[
                     styles.roundText,
-                    selectedDay === 'ALL' && styles.roundTextActive,
+                    selectedRound === 'ALL' && styles.roundTextActive,
                   ]}
                 >
                   Celkovo
                 </Text>
               </Pressable>
 
-              {playingDays.map((day) => (
+              {roundOrder.map((round) => (
                 <Pressable
-                  key={day}
+                  key={round}
                   style={[
                     styles.roundButton,
-                    selectedDay === day && styles.roundButtonActive,
+                    selectedRound === round && styles.roundButtonActive,
                   ]}
-                  onPress={() => setSelectedDay(day)}
+                  onPress={() => setSelectedRound(round)}
                 >
                   <Text
                     style={[
                       styles.roundText,
-                      selectedDay === day && styles.roundTextActive,
+                      selectedRound === round && styles.roundTextActive,
                     ]}
                   >
-                    {formatDate(day)}
+                    {round}. kolo
                   </Text>
                 </Pressable>
               ))}
             </ScrollView>
           </View>
 
-          {topDayPlayer && (
-            <View style={styles.topCard}>
-              <Text style={styles.topTitle}>🔥 TOP hráč dňa podľa M.O.</Text>
-              <Text style={styles.topPlayer}>
-                {topDayPlayer.name} — {topDayPlayer.points} b.
-              </Text>
-            </View>
-          )}
-
           <View style={styles.tableCard}>
             <Text style={styles.tableTitle}>
-              🏆 Tabuľka {selectedTable === 'STANDARD' ? 'STANDARD' : 'M.O.'}
+              🏆 {selectedRound === 'ALL' ? 'Celková tabuľka' : `${selectedRound}. kolo`}
             </Text>
 
             {activeStandings.length === 0 ? (
@@ -2305,112 +2103,77 @@ dailyProgress,
                 Tabuľka sa zobrazí po zadaní výsledkov.
               </Text>
             ) : (
-              activeStandings.map((player, index) => (
-                <View
-                  key={player.userId}
-                  style={[
-                    styles.tableRow,
-                    index === 0 && styles.firstPlaceRow,
-                  ]}
-                >
-                  <Text style={styles.rank}>
-  {index === 0
-    ? '🥇'
-    : index === 1
-      ? '🥈'
-      : index === 2
-        ? '🥉'
-        : `${index + 1}.`}
-</Text>
-                  <Text style={styles.playerName}>{player.name}</Text>
-                  <Text style={styles.points}>{player.points} b.</Text>
-                </View>
-              ))
+              <>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.standingsTable}>
+                    <View style={styles.standingsHeaderRow}>
+                      <Text style={[styles.standingsHeader, styles.colRank]}>#</Text>
+                      <Text style={[styles.standingsHeader, styles.colPlayer]}>Hráč</Text>
+                      <Text style={[styles.standingsHeader, styles.colStat]}>3 b.</Text>
+                      <Text style={[styles.standingsHeader, styles.colStat]}>1 b.</Text>
+                      <Text style={[styles.standingsHeader, styles.colTruth]}>TP</Text>
+                      <Text style={[styles.standingsHeader, styles.colPoints]}>Body</Text>
+                    </View>
+
+                    {activeStandings.map((player, index) => (
+                      <View
+                        key={player.userId}
+                        style={[
+                          styles.standingsRow,
+                          index === 0 && styles.firstPlaceRow,
+                        ]}
+                      >
+                        <Text style={[styles.standingsCell, styles.colRank]}>
+                          {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`}
+                        </Text>
+                        <Text style={[styles.standingsCell, styles.colPlayer]}>{player.name}</Text>
+                        <Text style={[styles.standingsCell, styles.colStat]}>{player.exactTips}</Text>
+                        <Text style={[styles.standingsCell, styles.colStat]}>{player.onePointTips}</Text>
+                        <Text style={[styles.standingsCell, styles.colTruth]}>{player.truthTable}</Text>
+                        <Text style={[styles.standingsCell, styles.colPoints, styles.points]}>{player.points}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </ScrollView>
+
+                <Text style={styles.tableLegend}>
+                  Tabuľka pravdy = počet 3-bodových + počet 1-bodových tipov.
+                </Text>
+              </>
             )}
           </View>
         </>
       )}
-      
-{mainView === 'STATS' && (
-  <>
-    <Text style={styles.sectionTitle}>📊 Štatistiky hráčov</Text>
 
-    {playerStats.length === 0 ? (
-      <Text style={styles.notice}>Zatiaľ nie sú žiadne štatistiky.</Text>
-    ) : (
-      playerStats.map((player, index) => (
-        <View key={player.userId} style={styles.tableCard}>
-          <Text style={styles.tableTitle}>
-            {index + 1}. {player.name}
-          </Text>
+      {mainView === 'STATS' && (
+        <>
+          <Text style={styles.sectionTitle}>📊 Štatistiky hráčov</Text>
 
-          <Text style={styles.notice}>Tipy spolu: {player.tips}</Text>
-          <Text style={styles.notice}>Vyhodnotené tipy: {player.evaluatedTips}</Text>
-          <Text style={styles.notice}>Presné výsledky: {player.exactResults}</Text>
-          <Text style={styles.notice}>Úspešnosť presných: {player.successRate}%</Text>
-          <Text style={styles.notice}>
-  🎯 Tabuľka pravdy: {player.correctResultType}
-</Text>
-          <Text style={styles.notice}>STANDARD body: {player.standardPoints}</Text>
-          <Text style={styles.notice}>M.O. body: {player.moPoints}</Text>
-          <Text style={styles.notice}>
-  🏆 Vyhrané dni: {player.wonDays}
-</Text>
+          {playerStats.length === 0 ? (
+            <Text style={styles.notice}>Zatiaľ nie sú žiadne štatistiky.</Text>
+          ) : (
+            playerStats.map((player, index) => (
+              <View key={player.userId} style={styles.tableCard}>
+                <Text style={styles.tableTitle}>
+                  {index + 1}. {player.name}
+                </Text>
 
-<Text style={styles.notice}>
-  ⭐ Najlepší deň: {player.bestDay} b.
-</Text>
-
-<Text style={styles.notice}>
-  📈 Priemer M.O. bodov: {player.averagePoints}
-</Text><Text style={styles.sectionTitle}>
-  📈 Vývoj bodov po dňoch
-</Text>
-
-{player.dailyProgress.map((day: any) => (
-  <View key={day.day} style={styles.progressRow}>
-    <Text style={styles.notice}>
-      {formatDate(day.day)} — {day.points} b.
-    </Text>
-
-    <View style={styles.statsBarBackground}>
-      <View
-        style={[
-          styles.statsBarFill,
-          {
-            width: `${
-              player.bestDay === 0
-                ? 0
-                : Math.max(
-                    8,
-                    Math.round((day.points / player.bestDay) * 100)
-                  )
-            }%`,
-          },
-        ]}
-      />
-    </View>
-  </View>
-))}
-        </View>
-      ))
-    )}
-  <View style={styles.tableCard}>
-  <Text style={styles.tableTitle}>
-    🏆 História TOP hráča dňa
-  </Text>
-
-  {topPlayersHistory.map((item: any, index) => (
-    <Text
-      key={`${item.day}-${index}`}
-      style={styles.notice}
-    >
-      {formatDate(item.day)} — {item.names} ({item.points} b.)
-    </Text>
-  ))}
-</View>
-  </>
-)}
+                <Text style={styles.notice}>Tipy spolu: {player.tips}</Text>
+                <Text style={styles.notice}>Vyhodnotené tipy: {player.evaluatedTips}</Text>
+                <Text style={styles.notice}>Presné výsledky (3 b.): {player.exactResults}</Text>
+                <Text style={styles.notice}>1-bodové tipy: {player.onePointTips}</Text>
+                <Text style={styles.notice}>Úspešnosť presných: {player.successRate}%</Text>
+                <Text style={styles.notice}>🎯 Tabuľka pravdy: {player.truthTable}</Text>
+                <Text style={styles.notice}>🏆 Vyhrané kolá: {player.wonRounds}</Text>
+                <Text style={styles.notice}>
+                  ⭐ Najlepšie kolo: {player.bestRound > 0 ? `${player.bestRound}. kolo (${player.bestRoundPoints} b.)` : '-'}
+                </Text>
+                <Text style={styles.notice}>Body spolu: {player.totalPoints}</Text>
+              </View>
+            ))
+          )}
+        </>
+      )}
       {mainView === 'PROFILE' && (
         <View style={styles.tableCard}>
           <Text style={styles.tableTitle}>👤 Profil</Text>
@@ -2433,32 +2196,6 @@ dailyProgress,
           <Pressable style={styles.primaryButton} onPress={updateUsername}>
             <Text style={styles.primaryButtonText}>Uložiť nové meno</Text>
           </Pressable>
-          <Text style={styles.sectionTitle}>
-  🔔 Notifikácie
-</Text>
-
-<Text style={styles.notice}>
-  Notifikácie sa zapínajú v nastaveniach telefónu.
-</Text>
-<Text style={styles.notice}>
-  1. Otvor Nastavenia telefónu
-</Text>
-
-<Text style={styles.notice}>
-  2. Aplikácie
-</Text>
-
-<Text style={styles.notice}>
-  3. Bundesliga 2026
-</Text>
-
-<Text style={styles.notice}>
-  4. Notifikácie
-</Text>
-
-<Text style={styles.notice}>
-  5. Povoliť notifikácie
-</Text>
         </View>
       )}
     </ScrollView>
@@ -2534,6 +2271,8 @@ const styles = StyleSheet.create({
   matchCard: { backgroundColor: 'white', borderRadius: 22, padding: 18, marginBottom: 18 },
   matchStatus: { alignSelf: 'flex-start', backgroundColor: '#FEE2E2', color: '#991B1B', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, fontWeight: '900', marginBottom: 8 },
   teamsRow: { flexDirection: 'row', alignItems: 'center' },
+  teamSide: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  teamLogo: { width: 46, height: 46, marginBottom: 6 },
   teamName: { flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '900' },
   vs: { paddingHorizontal: 10, fontWeight: '900', color: '#9CA3AF' },
   kickoff: { marginTop: 10, textAlign: 'center', color: '#6B7280', fontWeight: '800' },
@@ -2550,6 +2289,20 @@ const styles = StyleSheet.create({
   tipPlayer: { flex: 1, fontWeight: '900' },
   tipScore: { width: 70, textAlign: 'center', fontWeight: '900' },
   tipPoints: { width: 90, textAlign: 'right', fontWeight: '900', color: '#DC2626' },
+
+  upcomingRoundScroller: { marginBottom: 10 },
+  upcomingRoundScrollerContent: { paddingRight: 12 },
+
+  tipSummaryCard: { backgroundColor: 'white', borderRadius: 18, padding: 15, marginBottom: 14 },
+  tipSummaryTitle: { fontSize: 17, fontWeight: '900', marginBottom: 8, color: '#111827' },
+  tipSummaryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  tipSummaryMatch: { flex: 1, paddingRight: 8, fontSize: 13, fontWeight: '700', color: '#374151' },
+  tipSummaryComplete: { color: '#166534', fontWeight: '900' },
+  tipSummaryMissing: { color: '#991B1B', fontWeight: '900' },
+  tipSummaryNeutral: { color: '#6B7280', fontWeight: '800' },
+  disabledButton: { opacity: 0.6 },
+  unsavedBoxSmall: { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B', padding: 10, borderRadius: 12, marginTop: 10 },
+  unsavedText: { color: '#92400E', fontWeight: '900', textAlign: 'center' },
 
   successBox: { backgroundColor: '#DCFCE7', borderWidth: 1, borderColor: '#22C55E', padding: 14, borderRadius: 14, marginBottom: 14 },
   successBoxSmall: { backgroundColor: '#DCFCE7', borderWidth: 1, borderColor: '#22C55E', padding: 10, borderRadius: 12, marginTop: 10 },
@@ -2601,4 +2354,16 @@ championButtonText: {
 championButtonTextActive: {
   color: '#FFFFFF',
 },
+
+  standingsTable: { minWidth: 620 },
+  standingsHeaderRow: { flexDirection: 'row', backgroundColor: '#111827', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 6 },
+  standingsRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  standingsHeader: { color: 'white', fontWeight: '900', textAlign: 'center' },
+  standingsCell: { fontWeight: '700', textAlign: 'center' },
+  colRank: { width: 45 },
+  colPlayer: { width: 180, textAlign: 'left' },
+  colStat: { width: 70 },
+  colTruth: { width: 90 },
+  colPoints: { width: 80 },
+  tableLegend: { textAlign: 'center', color: '#6B7280', marginTop: 14, fontSize: 12 },
 });
