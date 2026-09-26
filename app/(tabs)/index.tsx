@@ -1798,7 +1798,10 @@ const updatePassword = async () => {
               styles.switchButton,
               mainView === 'TABLES' && styles.switchButtonActive,
             ]}
-            onPress={() => setMainView('TABLES')}
+            onPress={() => {
+              setSelectedRound('ALL');
+              setMainView('TABLES');
+            }}
           >
             <Text
               style={[
@@ -2109,10 +2112,10 @@ const updatePassword = async () => {
                     <View style={styles.standingsHeaderRow}>
                       <Text style={[styles.standingsHeader, styles.colRank]}>#</Text>
                       <Text style={[styles.standingsHeader, styles.colPlayer]}>Hráč</Text>
+                      <Text style={[styles.standingsHeader, styles.colPoints]}>Body</Text>
                       <Text style={[styles.standingsHeader, styles.colStat]}>3 b.</Text>
                       <Text style={[styles.standingsHeader, styles.colStat]}>1 b.</Text>
                       <Text style={[styles.standingsHeader, styles.colTruth]}>TP</Text>
-                      <Text style={[styles.standingsHeader, styles.colPoints]}>Body</Text>
                     </View>
 
                     {activeStandings.map((player, index) => (
@@ -2127,10 +2130,10 @@ const updatePassword = async () => {
                           {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`}
                         </Text>
                         <Text style={[styles.standingsCell, styles.colPlayer]}>{player.name}</Text>
+                        <Text style={[styles.standingsCell, styles.colPoints, styles.points]}>{player.points}</Text>
                         <Text style={[styles.standingsCell, styles.colStat]}>{player.exactTips}</Text>
                         <Text style={[styles.standingsCell, styles.colStat]}>{player.onePointTips}</Text>
                         <Text style={[styles.standingsCell, styles.colTruth]}>{player.truthTable}</Text>
-                        <Text style={[styles.standingsCell, styles.colPoints, styles.points]}>{player.points}</Text>
                       </View>
                     ))}
                   </View>
